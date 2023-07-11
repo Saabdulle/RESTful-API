@@ -5,6 +5,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const nodemailer = require('nodemailer');
 
 // Create app
 const app = express();
@@ -94,33 +95,98 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-// Function to send a confirmation email
+// Create a POST endpoint for changing password
+app.post('/api/actions/changepassword', async (req, res) => {
+  try {
+    // Get the current user from the token
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+    if (!token) return res.status(401).json({ error: 'Unauthorized' });
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const userId = decoded.userId;
 
-    function sendConfirmationEmail(email) {
-        const transporter = nodemailer.createTransport({
-          service: 'gmail',
-          auth: {
-            user: process.env.EMAIL_USER,
-            pass: process.env.EMAIL_PASSWORD,
-          },
-        });
-      
-        const mailOptions = {
-          from: process.env.EMAIL_USER,
-          to: email,
-          subject: 'Account Confirmation',
-          text: 'Thank you for registering an account!',
-        };
-      
-        transporter.sendMail(mailOptions, (err, info) => {
-          if (err) {
-            console.error('Error sending email:', err);
-          } else {
-            console.log('Email sent:', info.response);
-          }
-        });
-      }
-      
+    // Get the user from the database
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid user' });
+    }
+
+    // Compare the provided old password with the stored hashed password
+    const isOldPasswordValid = await bcrypt.compare(req.body.old_password, user.password);
+
+    if (!isOldPasswordValid) {
+      return res.status(401).json({ error: 'Invalid password' });
+    }
+
+    // Hash the new password
+    const hashedNewPassword = await bcrypt.hash(req.body.new_password, 10);
+
+    // Update the user's password in the database
+    user.password = hashedNewPassword;
+    await user.save();
+
+    // Respond with a success status
+    res.sendStatus(200);
+  } catch (error) {
+    console.error('Error changing password:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Create a GET endpoint for user profile
+app.get('/api/profiles', async (req, res) => {
+  try {
+    // Get the current user from the token
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+    if (!token) return res.status(401).json({ error: 'Unauthorized' });
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const userId = decoded.userId;
+
+    // Get the user from the database
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid user' });
+    }
+
+    // Respond with the user's personal information
+    res.status(200).json({ username: user.username, email: user.email });
+  } catch (error) {
+    console.error('Error fetching user profile:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+
+
+// Function to send a confirmation email
+function sendConfirmationEmail(email) {
+  const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASSWORD,
+    },
+  });
+
+  const mailOptions = {
+    from: process.env.EMAIL_USER,
+    to: email,
+    subject: 'Account Confirmation',
+    text: 'Thank you for registering an account!',
+  };
+
+  transporter.sendMail(mailOptions, (err, info) => {
+    if (err) {
+      console.error('Error sending email:', err);
+    } else {
+      console.log('Email sent:', info.response);
+    }
+  });
+}
+
 // Start the server
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
